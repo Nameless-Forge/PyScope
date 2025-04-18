@@ -16,7 +16,7 @@ from ctypes import windll, c_int, c_float, Structure, POINTER, WinError, WINFUNC
 from ctypes.wintypes import BOOL, HWND, RECT, DWORD, ULONG
 from PIL import Image, ImageQt
 from PyQt5.QtCore import Qt, QRect, QPoint, QTimer, QSize
-from PyQt5.QtGui import QPainterPath
+from PyQt5.QtGui import QPainterPath, QPainter, QPen, QColor
 from PyQt5.QtWidgets import QWidget, QApplication
 from PyQt5.QtGui import QRegion
 import mss

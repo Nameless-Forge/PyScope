@@ -40,7 +40,7 @@ class MagnifierGUI(QMainWindow):
         self.hotkey = KeyCode.from_char('x')
         self.hotkey_is_mouse = False
         self.hotkey_mouse_button = None
-        self.zoom_hotkey = Key.z
+        self.zoom_hotkey = KeyCode.from_char('z')
         self.zoom_hotkey_is_mouse = False 
         self.zoom_hotkey_mouse_button = None
         
