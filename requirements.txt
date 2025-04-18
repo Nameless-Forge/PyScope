@@ -1,0 +1,6 @@
+pyqt5>=5.15.0  # For GUI
+pillow>=8.0.0  # For image processing
+pynput>=1.7.0  # For global hotkeys
+mss>=6.1.0     # Fast screen capture
+numpy>=1.20.0  # For calculations and transformations
+pywin32>=300   # For Windows-specific functionality (optional)
