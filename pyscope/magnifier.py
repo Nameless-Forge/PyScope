@@ -573,12 +573,12 @@ class WindowsMagnifier:
             # Magnifier style MS_SHOWMAGNIFIEDCURSOR = 0x0001
 
             self.hwnd_host = self.user32.CreateWindowExW(
-                self.WS_EX_TOPMOST | self.WS_EX_LAYERED | self.WS_EX_TRANSPARENT,
+                WindowsMagnifier.WS_EX_TOPMOST | WindowsMagnifier.WS_EX_LAYERED | WindowsMagnifier.WS_EX_TRANSPARENT,
                 "Static", # Using a predefined class
-                "PyScope Host",
-                self.WS_POPUP | self.WS_VISIBLE, # Needs to be visible initially to contain magnifier
-                0, 0, 1, 1, # Start small and hidden initially
-                None, None, h_instance, None
+                "PyScope Magnifier",
+                WindowsMagnifier.WS_POPUP,
+                0, 0, self.width, self.height,
+                None, None, None, None
             )
 
             if not self.hwnd_host:

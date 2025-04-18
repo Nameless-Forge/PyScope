@@ -735,6 +735,7 @@ class MagnifierGUI(QMainWindow):
     def setup_keyboard_listeners(self):
         """Setup keyboard and mouse event listeners for global hotkeys."""
         def on_key_press(key):
+            logger.info(f"Key pressed: {key}")
             # Capture hotkey for settings
             if self.hotkey_capture_active:
                 self.hotkey_is_mouse = False
@@ -878,10 +879,13 @@ class MagnifierGUI(QMainWindow):
     def show_magnifier(self):
         """Show the magnifier or offset overlay."""
         self.window_visible = True
+        logger.info("Showing magnifier...")
         if self.offset_display_checkbox.isChecked() and self.offset_overlay:
-            self.invoke_in_main_thread(self.offset_overlay.show)
+            logger.info("Showing offset overlay")
+            self.offset_overlay.show()
         else:
-            self.invoke_in_main_thread(self.magnifier.show_window)
+            logger.info("Showing magnifier window")
+            self.magnifier.show_window()
 
     def hide_magnifier(self):
         """Hide the magnifier or offset overlay."""

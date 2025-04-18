@@ -22,6 +22,9 @@ import logging
 from pathlib import Path
 from typing import Dict, Any, Optional
 
+# Force screen capture mode
+USE_NATIVE_API = False
+
 # Version information
 __version__ = "0.1.0"
 __author__ = "Kill_Me_I_Noobs"
