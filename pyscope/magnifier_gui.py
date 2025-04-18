@@ -79,11 +79,9 @@ class MagnifierGUI(QMainWindow):
             )
 
     def invoke_in_main_thread(self, func, *args):
-        """Safely invoke a function in the main thread."""
-        timer = QTimer()
-        timer.setSingleShot(True)
-        timer.timeout.connect(lambda: func(*args))
-        timer.start(0)
+        """Выполнить `func` в главном GUI‑потоке."""
+        from PyQt5.QtCore import QTimer
+        QTimer.singleShot(0, lambda: func(*args))
     
     def init_ui(self):
         """Initialize the user interface."""

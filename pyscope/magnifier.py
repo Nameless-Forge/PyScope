@@ -386,12 +386,6 @@ class MagnifierWindow(QWidget):
     """Window class for displaying the magnified content."""
 
     def __init__(self, magnifier):
-        """
-        Initialize the magnifier window.
-
-        Args:
-            magnifier (Magnifier): The parent magnifier instance
-        """
         super().__init__()
         self.magnifier = magnifier
         self.image = None
@@ -404,6 +398,15 @@ class MagnifierWindow(QWidget):
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_NoSystemBackground)
+
+        if platform.system() == "Windows":
+            try:
+                WDA_EXCLUDEFROMCAPTURE = 0x11
+                windll.user32.SetWindowDisplayAffinity(
+                    int(self.winId()), WDA_EXCLUDEFROMCAPTURE
+                )
+            except Exception as e:
+                logger.warning(f"SetWindowDisplayAffinity failed: {e}")
 
         # Set initial size
         self.resize(magnifier.width, magnifier.height)
@@ -591,12 +594,14 @@ class WindowsMagnifier:
             # MS_SHOWMAGNIFIEDCURSOR = 0x0001 (Optional, shows cursor in magnified view)
             magnifier_style = self.WS_VISIBLE | 0x40000000 | self.MS_SHOWMAGNIFIEDCURSOR
 
-            self.hwnd_magnifier = self.user32.CreateWindowW(
-                self.WC_MAGNIFIER,
-                "PyScope Magnifier Control",
-                magnifier_style,
-                0, 0, self.width, self.height,
-                self.hwnd_host, None, h_instance, None
+            self.hwnd_magnifier = self.user32.CreateWindowExW(
+                0,                               # dwExStyle
+                self.WC_MAGNIFIER,               # lpClassName
+                "PyScope Magnifier Control",     # lpWindowName
+                magnifier_style,                 # dwStyle
+                0, 0, self.width, self.height,   # x, y, w, h
+                self.hwnd_host,                  # hWndParent
+                None, h_instance, None           # hMenu, hInstance, lpParam
             )
 
             if not self.hwnd_magnifier:
