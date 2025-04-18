@@ -864,30 +864,90 @@ class WindowsMagnifier:
 
     def show_window(self):
         """Show the magnifier window."""
-        if self.hwnd_host and self.user32 and self.initialized:
-            # Обязательно обновляем позицию перед показом
-            self._update_window_position()
-        
-            # Делаем паузу перед показом, чтобы убедиться, что позиция применилась
-            # Это может быть важно для Windows API
-            import time
-            time.sleep(0.05)
-        
-            # Показываем окно с флагом SW_SHOWNA (8) - показать без активации
-            self.user32.ShowWindow(self.hwnd_host, 8)
-        
-            # Обновляем содержимое окна
-            self._update_content()
-        
-            # Еще раз обновляем позицию после показа
-            self._update_window_position()
-
+        logger.info("Attempting to show Windows Magnifier window")
+    
+        if not self.hwnd_host or not self.user32 or not self.initialized:
+            logger.warning("Cannot show window - missing handles or not initialized")
+            return
+    
+        # Update position before showing
+        self._update_window_position()
+    
+        # Make a small pause to ensure position is applied
+        import time
+        time.sleep(0.05)
+    
+        # Show window with flag SW_SHOWNA (8) - show without activation
+        result = self.user32.ShowWindow(self.hwnd_host, 8)
+        logger.info(f"ShowWindow show result: {result}")
+    
+        # CRITICAL: Recreate the timer for updates
+        interval = int(1000 / self.refresh_rate)
+        timer_result = self.user32.SetTimer(self.hwnd_host, self.timer_id, interval, self.wnd_proc)
+        logger.info(f"Timer recreation result: {timer_result}")
+    
+        if not timer_result:
+            logger.error(f"Failed to recreate timer: {WinError()}")
+    
+        # Reset the transform to ensure it's properly applied
+        transform = self.MAGTRANSFORM()
+        transform.v[0] = float(self.zoom_level)  # x scale
+        transform.v[4] = float(self.zoom_level)  # y scale
+        transform.v[8] = 1.0  # Additional scale factor
+    
+        self.magnification.MagSetWindowTransform(self.hwnd_magnifier, byref(transform))
+    
+        # Update content immediately
+        self._update_content()
+    
+        # Update position again after showing
+        self._update_window_position()
+    
+        logger.info("Windows Magnifier window shown and updates enabled")
 
     def hide_window(self):
         """Hide the magnifier window."""
-        if self.hwnd_host and self.user32 and self.initialized:
+        logger.info("Attempting to hide Windows Magnifier window")
+    
+        if not self.hwnd_host or not self.user32 or not self.initialized:
+            logger.warning("Cannot hide window - missing handles or not initialized")
+            return
+        
+        # First kill the timer to stop updates
+        try:
+            result = self.user32.KillTimer(self.hwnd_host, self.timer_id)
+            logger.info(f"Killed timer: {result}")
+        except Exception as e:
+            logger.error(f"Error killing timer: {e}")
+    
+        # Try to hide the window
+        try:
             # SW_HIDE = 0
-            self.user32.ShowWindow(self.hwnd_host, 0)
+            result = self.user32.ShowWindow(self.hwnd_host, 0)
+            logger.info(f"ShowWindow hide result: {result}")
+        
+            # Additional force-hide attempt
+            if not result:
+                # Try with different flags
+                result = self.user32.SetWindowPos(
+                    self.hwnd_host,
+                    0,  # HWND_TOP
+                    0, 0, 0, 0,
+                    0x0080 | 0x0400  # SWP_HIDEWINDOW | SWP_NOMOVE
+                )
+                logger.info(f"SetWindowPos hide result: {result}")
+            
+            # Check if window is actually hidden
+            style = self.user32.GetWindowLongW(self.hwnd_host, -16)  # GWL_STYLE
+            is_visible = (style & 0x10000000) != 0  # WS_VISIBLE
+            logger.info(f"Window visible state after hide: {is_visible}")
+        
+            if is_visible:
+                logger.warning("Window is still visible after hide attempt")
+        except Exception as e:
+            logger.error(f"Error hiding window: {e}")
+        
+        logger.info("Windows Magnifier hide_window completed")
 
     def dispose(self):
         """Clean up resources."""

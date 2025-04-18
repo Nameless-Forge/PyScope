@@ -869,7 +869,9 @@ class MagnifierGUI(QMainWindow):
     
     def toggle_magnifier_visibility(self):
         """Toggle the visibility of the magnifier."""
+        previous_state = self.window_visible
         self.window_visible = not self.window_visible
+        logger.info(f"Toggling magnifier visibility: {previous_state} -> {self.window_visible}")
         
         if self.window_visible:
             self.show_magnifier()
@@ -890,10 +892,20 @@ class MagnifierGUI(QMainWindow):
     def hide_magnifier(self):
         """Hide the magnifier or offset overlay."""
         self.window_visible = False
+        logger.info("Hiding magnifier...")
+
         if self.offset_display_checkbox.isChecked() and self.offset_overlay:
-            self.invoke_in_main_thread(self.offset_overlay.hide)
+            logger.info("Hiding offset overlay")
+            self.offset_overlay.hide()
         else:
-            self.invoke_in_main_thread(self.magnifier.hide_window)
+            logger.info("Hiding magnifier window directly")
+            # Don't use invoke_in_main_thread - call directly for more reliable operation
+            self.magnifier.hide_window()
+        
+            # Double check the magnifier's internal state
+            if self.magnifier.visible:
+                logger.warning("Magnifier still marked as visible after hide_window call")
+                self.magnifier.visible = False
 
     def closeEvent(self, event):
         """Handle window close event."""
