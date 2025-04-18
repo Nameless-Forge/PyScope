@@ -1,12 +1,14 @@
 import sys
 import os
 import json
+import logging
+import platform
 from PyQt5.QtCore import Qt, QSize, QTimer
-from PyQt5.QtGui import QFont, QColor
+from PyQt5.QtGui import QFont, QColor, QIcon
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QLabel, QSlider, QLineEdit, QCheckBox, QRadioButton, QButtonGroup,
-    QPushButton, QGridLayout, QGroupBox
+    QPushButton, QGridLayout, QGroupBox, QMessageBox, QStatusBar
 )
 from pynput import keyboard, mouse
 from pynput.keyboard import Key, KeyCode
@@ -16,6 +18,9 @@ from .magnifier import Magnifier
 from .utils.overlay import OffsetOverlay
 from .utils.settings import Settings
 
+# Set up logger
+logger = logging.getLogger(__name__)
+
 class MagnifierGUI(QMainWindow):
     """GUI for controlling the PyScope screen magnifier."""
     
@@ -23,7 +28,7 @@ class MagnifierGUI(QMainWindow):
         super().__init__()
         # Initialize core components
         self.magnifier = Magnifier()
-        self.magnifier.initialize()
+        self.initialize_magnifier()
         
         # Setup keyboard/mouse listeners
         self.key_listener = None
@@ -56,12 +61,31 @@ class MagnifierGUI(QMainWindow):
         self.apply_settings()
         
         # Set window properties
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        self.setWindowFlags(Qt.WindowStaysOnTopHint)
         self.setStyleSheet("background-color: #2b2b2b;")
+        
+        # Display status message about the magnifier mode
+        self.update_status_message()
+    
+    def initialize_magnifier(self):
+        """Initialize the magnifier and handle any errors."""
+        success = self.magnifier.initialize()
+        if not success:
+            QMessageBox.warning(
+                self, 
+                "Initialization Warning",
+                "Could not fully initialize the magnifier. Some features may be limited.",
+                QMessageBox.Ok
+            )
     
     def init_ui(self):
         """Initialize the user interface."""
         self.setWindowTitle("PyScope Settings")
+        
+        # Try to load icon if available
+        icon_path = os.path.join(os.path.dirname(__file__), 'resources', 'icon.png')
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
         
         # Create main widget and layout
         main_widget = QWidget()
@@ -83,8 +107,14 @@ class MagnifierGUI(QMainWindow):
         tip_label.setStyleSheet("color: #aaaaaa; font-size: 16px;")
         tip_label.setAlignment(Qt.AlignCenter)
         
+        # Add warning for fullscreen mode
+        warning_label = QLabel("⚠️ FULLSCREEN NOT SUPPORTED ⚠️")
+        warning_label.setStyleSheet("color: #ff7777; font-size: 14px; font-weight: bold;")
+        warning_label.setAlignment(Qt.AlignCenter)
+        
         header_layout.addWidget(title_label)
         header_layout.addWidget(tip_label)
+        header_layout.addWidget(warning_label)
         main_layout.addWidget(header_widget)
         
         # Create content widget
@@ -102,6 +132,10 @@ class MagnifierGUI(QMainWindow):
         # Zoom settings
         self.create_zoom_settings_group(content_layout)
         
+        # API mode display (only on Windows)
+        if platform.system() == "Windows":
+            self.create_api_mode_group(content_layout)
+        
         main_layout.addWidget(content_widget)
         
         # Create button panel
@@ -113,18 +147,55 @@ class MagnifierGUI(QMainWindow):
         apply_button.setStyleSheet("background-color: #3d3d3d; color: white; padding: 8px 16px;")
         apply_button.clicked.connect(self.on_apply_settings)
         
+        reset_button = QPushButton("Reset Defaults")
+        reset_button.setStyleSheet("background-color: #3d3d3d; color: white; padding: 8px 16px;")
+        reset_button.clicked.connect(self.on_reset_defaults)
+        
         exit_button = QPushButton("Exit")
         exit_button.setStyleSheet("background-color: #3d3d3d; color: white; padding: 8px 16px;")
         exit_button.clicked.connect(self.on_exit)
         
         button_layout.addWidget(apply_button)
+        button_layout.addWidget(reset_button)
         button_layout.addWidget(exit_button)
         
         main_layout.addWidget(button_panel)
         
+        # Add status bar
+        self.status_bar = QStatusBar()
+        self.status_bar.setStyleSheet("color: #aaaaaa;")
+        main_layout.addWidget(self.status_bar)
+        
         # Set size
-        self.setMinimumWidth(400)
+        self.setMinimumWidth(430)
         self.setFixedSize(self.sizeHint())
+    
+    def create_api_mode_group(self, parent_layout):
+        """Create a group to display the API mode (Windows only)."""
+        api_group = QGroupBox("Magnification Engine")
+        api_group.setStyleSheet("QGroupBox { color: white; border: 1px solid gray; margin-top: 1ex; } "
+                                "QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top center; padding: 0 3px; }")
+        api_layout = QVBoxLayout(api_group)
+        
+        # Create label to display the API mode
+        self.api_mode_label = QLabel("")
+        
+        # Set the text based on the current magnifier state
+        if hasattr(self.magnifier, 'use_native_api'):
+            if self.magnifier.use_native_api:
+                self.api_mode_label.setText("Using Windows Magnification API (Best Performance)")
+                self.api_mode_label.setStyleSheet("color: #88ff88;")  # Green for good
+            else:
+                self.api_mode_label.setText("Using Screen Capture (Compatibility Mode)")
+                self.api_mode_label.setStyleSheet("color: #ffaa44;")  # Orange for warning
+        else:
+            self.api_mode_label.setText("Unknown API Mode")
+            self.api_mode_label.setStyleSheet("color: #ff7777;")  # Red for error
+        
+        self.api_mode_label.setAlignment(Qt.AlignCenter)
+        api_layout.addWidget(self.api_mode_label)
+        
+        parent_layout.addWidget(api_group)
     
     def create_hotkey_group(self, parent_layout):
         """Create hotkey settings group."""
@@ -234,7 +305,7 @@ class MagnifierGUI(QMainWindow):
         self.x_offset_input.setStyleSheet("background-color: #3d3d3d; color: white; padding: 5px;")
         
         self.x_offset_slider = QSlider(Qt.Horizontal)
-        self.x_offset_slider.setRange(-100, 100)
+        self.x_offset_slider.setRange(-200, 200)  # Increased range from -100,100
         self.x_offset_slider.setValue(0)
         self.x_offset_slider.setStyleSheet("QSlider::groove:horizontal { background: #555555; height: 8px; border-radius: 4px; }"
                                          "QSlider::handle:horizontal { background: #888888; width: 18px; margin: -5px 0; border-radius: 9px; }")
@@ -248,7 +319,7 @@ class MagnifierGUI(QMainWindow):
         self.y_offset_input.setStyleSheet("background-color: #3d3d3d; color: white; padding: 5px;")
         
         self.y_offset_slider = QSlider(Qt.Horizontal)
-        self.y_offset_slider.setRange(-100, 100)
+        self.y_offset_slider.setRange(-200, 200)  # Increased range from -100,100
         self.y_offset_slider.setValue(0)
         self.y_offset_slider.setStyleSheet("QSlider::groove:horizontal { background: #555555; height: 8px; border-radius: 4px; }"
                                          "QSlider::handle:horizontal { background: #888888; width: 18px; margin: -5px 0; border-radius: 9px; }")
@@ -339,6 +410,57 @@ class MagnifierGUI(QMainWindow):
         """Handle apply settings button click."""
         self.save_settings()
         self.apply_settings()
+        self.status_bar.showMessage("Settings applied successfully", 3000)
+    
+    def on_reset_defaults(self):
+        """Reset all settings to default values."""
+        result = QMessageBox.question(
+            self,
+            "Reset to Defaults",
+            "Are you sure you want to reset all settings to their default values?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        
+        if result == QMessageBox.Yes:
+            # Reset using settings manager
+            default_settings = self.settings.reset_to_defaults()
+            
+            # Update UI with default values
+            self.width_input.setText(str(default_settings["width"]))
+            self.width_slider.setValue(default_settings["width"])
+            
+            self.height_input.setText(str(default_settings["height"]))
+            self.height_slider.setValue(default_settings["height"])
+            
+            self.circular_checkbox.setChecked(default_settings["circular"])
+            
+            self.refresh_input.setText(str(default_settings["refresh_rate"]))
+            self.refresh_slider.setValue(default_settings["refresh_rate"])
+            
+            self.x_offset_input.setText(str(default_settings["x_offset"]))
+            self.x_offset_slider.setValue(default_settings["x_offset"])
+            
+            self.y_offset_input.setText(str(default_settings["y_offset"]))
+            self.y_offset_slider.setValue(default_settings["y_offset"])
+            
+            self.toggle_radio.setChecked(default_settings["toggle_mode"])
+            self.hold_radio.setChecked(not default_settings["toggle_mode"])
+            
+            self.hotkey_input.setText(default_settings["hotkey_text"])
+            self.hotkey_is_mouse = default_settings["hotkey_is_mouse"]
+            
+            self.zoom_hotkey_input.setText(default_settings["zoom_hotkey_text"])
+            self.zoom_hotkey_is_mouse = default_settings["zoom_hotkey_is_mouse"]
+            
+            self.zoom_low_input.setText(str(default_settings["zoom_low"]))
+            self.zoom_high_input.setText(str(default_settings["zoom_high"]))
+            
+            self.offset_display_checkbox.setChecked(default_settings["display_offset"])
+            
+            # Apply settings
+            self.apply_settings()
+            
+            self.status_bar.showMessage("Settings reset to defaults", 3000)
     
     def on_exit(self):
         """Handle exit button click."""
@@ -355,91 +477,179 @@ class MagnifierGUI(QMainWindow):
         # Exit application
         QApplication.quit()
     
+    def update_status_message(self):
+        """Update the status bar with information about the current magnifier mode."""
+        if hasattr(self.magnifier, 'use_native_api'):
+            if self.magnifier.use_native_api:
+                self.status_bar.showMessage("Using Windows Magnification API for best performance")
+            else:
+                self.status_bar.showMessage("Using screen capture mode")
+        else:
+            self.status_bar.showMessage("Ready")
+    
     def save_settings(self):
         """Save settings to file."""
-        settings = {
-            "width": int(self.width_input.text()),
-            "height": int(self.height_input.text()),
-            "circular": self.circular_checkbox.isChecked(),
-            "refresh_rate": int(self.refresh_input.text()),
-            "x_offset": int(self.x_offset_input.text()),
-            "y_offset": int(self.y_offset_input.text()),
-            "toggle_mode": self.toggle_radio.isChecked(),
-            "hotkey_text": self.hotkey_input.text(),
-            "hotkey_is_mouse": self.hotkey_is_mouse,
-            "hotkey_mouse_button": self.hotkey_mouse_button.name if self.hotkey_is_mouse and self.hotkey_mouse_button else None,
-            "zoom_hotkey_text": self.zoom_hotkey_input.text(),
-            "zoom_hotkey_is_mouse": self.zoom_hotkey_is_mouse,
-            "zoom_hotkey_mouse_button": self.zoom_hotkey_mouse_button.name if self.zoom_hotkey_is_mouse and self.zoom_hotkey_mouse_button else None,
-            "zoom_low": float(self.zoom_low_input.text()),
-            "zoom_high": float(self.zoom_high_input.text()),
-            "display_offset": self.offset_display_checkbox.isChecked()
-        }
-        
-        # Save using settings manager
-        self.settings.save_settings(settings)
+        try:
+            settings = {
+                "width": int(self.width_input.text()),
+                "height": int(self.height_input.text()),
+                "circular": self.circular_checkbox.isChecked(),
+                "refresh_rate": int(self.refresh_input.text()),
+                "x_offset": int(self.x_offset_input.text()),
+                "y_offset": int(self.y_offset_input.text()),
+                "toggle_mode": self.toggle_radio.isChecked(),
+                "hotkey_text": self.hotkey_input.text(),
+                "hotkey_is_mouse": self.hotkey_is_mouse,
+                "hotkey_mouse_button": self.hotkey_mouse_button.name if self.hotkey_is_mouse and self.hotkey_mouse_button else None,
+                "zoom_hotkey_text": self.zoom_hotkey_input.text(),
+                "zoom_hotkey_is_mouse": self.zoom_hotkey_is_mouse,
+                "zoom_hotkey_mouse_button": self.zoom_hotkey_mouse_button.name if self.zoom_hotkey_is_mouse and self.zoom_hotkey_mouse_button else None,
+                "zoom_low": float(self.zoom_low_input.text()),
+                "zoom_high": float(self.zoom_high_input.text()),
+                "display_offset": self.offset_display_checkbox.isChecked()
+            }
+            
+            # Save using settings manager
+            self.settings.save_settings(settings)
+            logger.info("Settings saved successfully")
+        except Exception as e:
+            logger.error(f"Error saving settings: {e}")
+            QMessageBox.warning(
+                self,
+                "Save Error",
+                f"Could not save settings: {str(e)}",
+                QMessageBox.Ok
+            )
     
     def load_settings(self):
         """Load settings from file."""
         settings = self.settings.load_settings()
         if not settings:
+            logger.warning("No settings found, using defaults")
             return
         
-        # Apply to UI
-        self.width_input.setText(str(settings.get("width", 400)))
-        self.width_slider.setValue(int(settings.get("width", 400)))
-        
-        self.height_input.setText(str(settings.get("height", 400)))
-        self.height_slider.setValue(int(settings.get("height", 400)))
-        
-        self.circular_checkbox.setChecked(settings.get("circular", True))
-        
-        self.refresh_input.setText(str(settings.get("refresh_rate", 60)))
-        self.refresh_slider.setValue(int(settings.get("refresh_rate", 60)))
-        
-        self.x_offset_input.setText(str(settings.get("x_offset", 0)))
-        self.x_offset_slider.setValue(int(settings.get("x_offset", 0)))
-        
-        self.y_offset_input.setText(str(settings.get("y_offset", 0)))
-        self.y_offset_slider.setValue(int(settings.get("y_offset", 0)))
-        
-        self.toggle_radio.setChecked(settings.get("toggle_mode", True))
-        self.hold_radio.setChecked(not settings.get("toggle_mode", True))
-        
-        self.hotkey_input.setText(settings.get("hotkey_text", "X"))
-        self.hotkey_is_mouse = settings.get("hotkey_is_mouse", False)
-        
-        self.zoom_hotkey_input.setText(settings.get("zoom_hotkey_text", "Z"))
-        self.zoom_hotkey_is_mouse = settings.get("zoom_hotkey_is_mouse", False)
-        
-        self.zoom_low_input.setText(str(settings.get("zoom_low", 2.0)))
-        self.zoom_high_input.setText(str(settings.get("zoom_high", 4.0)))
-        
-        self.offset_display_checkbox.setChecked(settings.get("display_offset", False))
-        
-        # Load hotkey settings
-        if self.hotkey_is_mouse:
-            button_name = settings.get("hotkey_mouse_button")
-            if button_name:
-                self.hotkey_mouse_button = getattr(Button, button_name)
-        else:
-            self.hotkey = self.key_from_string(settings.get("hotkey_text", "x"))
-        
-        # Load zoom hotkey settings
-        if self.zoom_hotkey_is_mouse:
-            button_name = settings.get("zoom_hotkey_mouse_button")
-            if button_name:
-                self.zoom_hotkey_mouse_button = getattr(Button, button_name)
-        else:
-            self.zoom_hotkey = self.key_from_string(settings.get("zoom_hotkey_text", "z"))
+        try:
+            # Apply to UI
+            self.width_input.setText(str(settings.get("width", 400)))
+            self.width_slider.setValue(int(settings.get("width", 400)))
+            
+            self.height_input.setText(str(settings.get("height", 400)))
+            self.height_slider.setValue(int(settings.get("height", 400)))
+            
+            self.circular_checkbox.setChecked(settings.get("circular", True))
+            
+            self.refresh_input.setText(str(settings.get("refresh_rate", 60)))
+            self.refresh_slider.setValue(int(settings.get("refresh_rate", 60)))
+            
+            self.x_offset_input.setText(str(settings.get("x_offset", 0)))
+            self.x_offset_slider.setValue(int(settings.get("x_offset", 0)))
+            
+            self.y_offset_input.setText(str(settings.get("y_offset", 0)))
+            self.y_offset_slider.setValue(int(settings.get("y_offset", 0)))
+            
+            self.toggle_radio.setChecked(settings.get("toggle_mode", True))
+            self.hold_radio.setChecked(not settings.get("toggle_mode", True))
+            
+            self.hotkey_input.setText(settings.get("hotkey_text", "X"))
+            self.hotkey_is_mouse = settings.get("hotkey_is_mouse", False)
+            
+            self.zoom_hotkey_input.setText(settings.get("zoom_hotkey_text", "Z"))
+            self.zoom_hotkey_is_mouse = settings.get("zoom_hotkey_is_mouse", False)
+            
+            self.zoom_low_input.setText(str(settings.get("zoom_low", 2.0)))
+            self.zoom_high_input.setText(str(settings.get("zoom_high", 4.0)))
+            
+            self.offset_display_checkbox.setChecked(settings.get("display_offset", False))
+            
+            # Load hotkey settings
+            if self.hotkey_is_mouse:
+                button_name = settings.get("hotkey_mouse_button")
+                if button_name:
+                    try:
+                        self.hotkey_mouse_button = getattr(Button, button_name)
+                    except AttributeError:
+                        logger.warning(f"Mouse button '{button_name}' not found, using defaults")
+                        self.hotkey_is_mouse = False
+            else:
+                self.hotkey = self.key_from_string(settings.get("hotkey_text", "x"))
+            
+            # Load zoom hotkey settings
+            if self.zoom_hotkey_is_mouse:
+                button_name = settings.get("zoom_hotkey_mouse_button")
+                if button_name:
+                    try:
+                        self.zoom_hotkey_mouse_button = getattr(Button, button_name)
+                    except AttributeError:
+                        logger.warning(f"Mouse button '{button_name}' not found, using defaults")
+                        self.zoom_hotkey_is_mouse = False
+            else:
+                self.zoom_hotkey = self.key_from_string(settings.get("zoom_hotkey_text", "z"))
+                
+            logger.info("Settings loaded successfully")
+        except Exception as e:
+            logger.error(f"Error loading settings: {e}")
+            QMessageBox.warning(
+                self,
+                "Load Error",
+                f"Could not load settings: {str(e)}",
+                QMessageBox.Ok
+            )
     
     def key_from_string(self, key_str):
-        """Convert a key string to a pynput.keyboard.Key or KeyCode."""
-        # Handle special keys
-        if key_str == "Insert":
-            return Key.insert
+        """
+        Convert a key string to a pynput.keyboard.Key or KeyCode.
         
-        # Common keys
+        Args:
+            key_str (str): String representation of the key
+            
+        Returns:
+            Key or KeyCode: The key object
+        """
+        # Handle special keys
+        if key_str.lower() == "insert":
+            return Key.insert
+            
+        # Dictionary of common key mappings
+        key_map = {
+            "space": Key.space,
+            "tab": Key.tab,
+            "enter": Key.enter,
+            "return": Key.enter,
+            "backspace": Key.backspace,
+            "delete": Key.delete,
+            "esc": Key.esc,
+            "escape": Key.esc,
+            "up": Key.up,
+            "down": Key.down,
+            "left": Key.left,
+            "right": Key.right,
+            "home": Key.home,
+            "end": Key.end,
+            "page up": Key.page_up,
+            "page down": Key.page_down,
+            "shift": Key.shift,
+            "ctrl": Key.ctrl,
+            "control": Key.ctrl,
+            "alt": Key.alt,
+            "f1": Key.f1,
+            "f2": Key.f2,
+            "f3": Key.f3,
+            "f4": Key.f4,
+            "f5": Key.f5,
+            "f6": Key.f6,
+            "f7": Key.f7,
+            "f8": Key.f8,
+            "f9": Key.f9,
+            "f10": Key.f10,
+            "f11": Key.f11,
+            "f12": Key.f12
+        }
+        
+        # Check key map
+        if key_str.lower() in key_map:
+            return key_map[key_str.lower()]
+        
+        # Check direct key attributes
         for key in vars(Key):
             if not key.startswith('_') and key_str.lower() == key:
                 return getattr(Key, key)
@@ -449,6 +659,7 @@ class MagnifierGUI(QMainWindow):
             return KeyCode.from_char(key_str.lower())
         
         # Default
+        logger.warning(f"Unknown key '{key_str}', defaulting to 'x'")
         return KeyCode.from_char('x')
     
     def apply_settings(self):
@@ -494,10 +705,27 @@ class MagnifierGUI(QMainWindow):
             else:
                 if self.offset_overlay and self.offset_overlay.isVisible():
                     self.offset_overlay.hide()
+                    
+            logger.info("Settings applied successfully")
         
         except ValueError as e:
-            # Handle input errors
-            print(f"Error applying settings: {e}")
+            error_message = f"Invalid setting value: {e}"
+            logger.error(error_message)
+            QMessageBox.warning(
+                self,
+                "Input Error",
+                error_message,
+                QMessageBox.Ok
+            )
+        except Exception as e:
+            error_message = f"Error applying settings: {e}"
+            logger.error(error_message)
+            QMessageBox.warning(
+                self,
+                "Error",
+                error_message,
+                QMessageBox.Ok
+            )
     
     def setup_keyboard_listeners(self):
         """Setup keyboard and mouse event listeners for global hotkeys."""
@@ -573,14 +801,34 @@ class MagnifierGUI(QMainWindow):
                     self.hide_magnifier()
         
         # Setup listeners
-        self.key_listener = keyboard.Listener(on_press=on_key_press, on_release=on_key_release)
-        self.key_listener.start()
-        
-        self.mouse_listener = mouse.Listener(on_click=on_mouse_click)
-        self.mouse_listener.start()
+        try:
+            self.key_listener = keyboard.Listener(on_press=on_key_press, on_release=on_key_release)
+            self.key_listener.start()
+            
+            self.mouse_listener = mouse.Listener(on_click=on_mouse_click)
+            self.mouse_listener.start()
+            
+            logger.info("Keyboard and mouse listeners started successfully")
+        except Exception as e:
+            error_message = f"Error setting up input listeners: {e}"
+            logger.error(error_message)
+            QMessageBox.critical(
+                self,
+                "Critical Error",
+                error_message + "\nGlobal hotkeys will not work.",
+                QMessageBox.Ok
+            )
     
     def get_key_name(self, key):
-        """Get displayable name for a key."""
+        """
+        Get displayable name for a key.
+        
+        Args:
+            key: The key object from pynput
+            
+        Returns:
+            str: Human-readable name of the key
+        """
         try:
             if hasattr(key, 'char'):
                 if key.char:
@@ -595,7 +843,15 @@ class MagnifierGUI(QMainWindow):
             return "Unknown"
     
     def get_button_name(self, button):
-        """Get displayable name for a mouse button."""
+        """
+        Get displayable name for a mouse button.
+        
+        Args:
+            button: The button object from pynput
+            
+        Returns:
+            str: Human-readable name of the button
+        """
         if button == Button.left:
             return "Left Button"
         elif button == Button.right:
@@ -629,3 +885,21 @@ class MagnifierGUI(QMainWindow):
             self.offset_overlay.hide()
         else:
             self.magnifier.hide_window()
+    
+    def closeEvent(self, event):
+        """Handle window close event."""
+        # Don't actually close, just hide the window
+        if event.spontaneous():
+            event.ignore()
+            self.hide()
+        else:
+            # This is a programmatic close, allow it
+            event.accept()
+    
+    def keyPressEvent(self, event):
+        """Handle key press events."""
+        # Hide window on Escape key
+        if event.key() == Qt.Key_Escape:
+            self.hide()
+        else:
+            super().keyPressEvent(event)
