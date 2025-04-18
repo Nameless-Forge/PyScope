@@ -563,21 +563,23 @@ class WindowsMagnifier:
             h_instance = windll.kernel32.GetModuleHandleW(None)
             class_name = "PyScope_Magnifier_Host"
 
-            # Create a basic host window using a standard class like "Static" first
-            # as registering a custom class purely with ctypes is complex
-            # WS_CHILD = 0x40000000
-            # WS_BORDER = 0x00800000
-            # WS_VISIBLE = 0x10000000
-            # WS_CLIPSIBLINGS = 0x04000000
-            # WS_CLIPCHILDREN = 0x02000000
-            # Magnifier style MS_SHOWMAGNIFIEDCURSOR = 0x0001
+            # Get screen dimensions for initial positioning
+            screen_width = self.user32.GetSystemMetrics(0)  # SM_CXSCREEN
+            screen_height = self.user32.GetSystemMetrics(1)  # SM_CYSCREEN
+        
+            # Calculate initial position - ВАЖНО: используем расчет положения центра
+            x = (screen_width - self.width) // 2 + self.x_offset
+            y = (screen_height - self.height) // 2 + self.y_offset
+        
+            logger.info(f"Initial window position: x={x}, y={y}, width={self.width}, height={self.height}")
 
+            # Create a basic host window using a standard class like "Static" first
             self.hwnd_host = self.user32.CreateWindowExW(
                 WindowsMagnifier.WS_EX_TOPMOST | WindowsMagnifier.WS_EX_LAYERED | WindowsMagnifier.WS_EX_TRANSPARENT,
                 "Static", # Using a predefined class
                 "PyScope Magnifier",
                 WindowsMagnifier.WS_POPUP,
-                0, 0, self.width, self.height,
+                x, y, self.width, self.height,  # Явное указание начальной позиции!
                 None, None, None, None
             )
 
@@ -586,12 +588,7 @@ class WindowsMagnifier:
                 self.magnification.MagUninitialize()
                 return False
 
-            # Set the custom WndProc (May not work reliably with 'Static' class)
-            # self.user32.SetWindowLongPtrW(self.hwnd_host, -4, self.wnd_proc) # GWLP_WNDPROC = -4
-
             # Create magnifier control window as a child of the host
-            # WS_CHILD = 0x40000000
-            # MS_SHOWMAGNIFIEDCURSOR = 0x0001 (Optional, shows cursor in magnified view)
             magnifier_style = self.WS_VISIBLE | 0x40000000 | self.MS_SHOWMAGNIFIEDCURSOR
 
             self.hwnd_magnifier = self.user32.CreateWindowExW(
@@ -599,7 +596,7 @@ class WindowsMagnifier:
                 self.WC_MAGNIFIER,               # lpClassName
                 "PyScope Magnifier Control",     # lpWindowName
                 magnifier_style,                 # dwStyle
-                0, 0, self.width, self.height,   # x, y, w, h
+                0, 0, self.width, self.height,   # x, y, w, h внутри родителя
                 self.hwnd_host,                  # hWndParent
                 None, h_instance, None           # hMenu, hInstance, lpParam
             )
@@ -609,6 +606,23 @@ class WindowsMagnifier:
                 self.user32.DestroyWindow(self.hwnd_host)
                 self.magnification.MagUninitialize()
                 return False
+
+            # Проверка и логирование получившейся геометрии окна
+            rc = self.RECT()
+            if self.user32.GetWindowRect(self.hwnd_host, byref(rc)):
+                logger.info(f"Host window rect: left={rc.left}, top={rc.top}, right={rc.right}, bottom={rc.bottom}")
+            
+                # Проверка, соответствует ли позиция ожидаемой
+                if rc.left != x or rc.top != y:
+                    logger.warning(f"Window position mismatch: expected ({x},{y}), got ({rc.left},{rc.top})")
+                
+                    # Попытка принудительно установить позицию
+                    if not self.user32.SetWindowPos(
+                        self.hwnd_host, -1, x, y, self.width, self.height, 0
+                    ):
+                        logger.warning(f"Failed to correct window position: {WinError()}")
+            else:
+                logger.warning("Failed to get window rectangle.")
 
             # Set initial transform
             transform = self.MAGTRANSFORM()
@@ -623,24 +637,20 @@ class WindowsMagnifier:
                 self.magnification.MagUninitialize()
                 return False
 
+            # Убедимся, что окно точно на правильной позиции
+            self._update_window_position()
+        
             # Set window shape if circular after setting size/position
-            self._update_window_position() # Set initial size and position
             if self.circular:
                 self._set_circular_region()
 
             # Set refresh timer on the host window
             interval = int(1000 / self.refresh_rate)
-            # Instead of relying on WndProc for timer, use SetTimer with a NULL callback,
-            # polling WM_TIMER in the main loop (if one exists) or handling it here.
-            # Using a callback with ctypes can be tricky. Let's stick to MagSetWindowSource update.
-            # The Mag API might handle refreshes internally, but we'll force updates.
-            # Let's keep the explicit timer/update loop for now. A dedicated thread might be better.
-            if not self.user32.SetTimer(self.hwnd_host, self.timer_id, interval, self.wnd_proc): # Pass the proc directly
-                 logger.error(f"Failed to set timer. Error code: {WinError()}")
-                 # Continue anyway, manual updates might still work partially
-                 # self.dispose() # Clean up if timer fails
-                 # return False
+            if not self.user32.SetTimer(self.hwnd_host, self.timer_id, interval, self.wnd_proc):
+                logger.error(f"Failed to set timer. Error code: {WinError()}")
 
+            # Для полной уверенности запускаем обновление содержимого сразу
+            self._update_content()
 
             self.initialized = True
             logger.info("Windows Magnifier initialized.")
@@ -684,27 +694,29 @@ class WindowsMagnifier:
             x = (screen_width - self.width) // 2 + self.x_offset
             y = (screen_height - self.height) // 2 + self.y_offset
 
-            # Move window
-            # SWP Flags:
-            # SWP_NOSIZE = 0x0001
-            # SWP_NOMOVE = 0x0002
-            # SWP_NOZORDER = 0x0004
-            # SWP_NOACTIVATE = 0x0010
-            # SWP_SHOWWINDOW = 0x0040
-            flags = 0x0010 | 0x0004 # SWP_NOACTIVATE | SWP_NOZORDER
+            logger.info(f"Setting window position: x={x}, y={y}, width={self.width}, height={self.height}")
+
+            flags = 0x0010  # SWP_NOACTIVATE
+            # Move host window
             self.user32.SetWindowPos(
                 self.hwnd_host,
-                -1, # HWND_TOPMOST
+                -1,  # HWND_TOPMOST
                 x, y, self.width, self.height,
                 flags
             )
-            # Also resize the magnifier control inside the host
+            # Resize magnifier control
             self.user32.SetWindowPos(
-                self.hwnd_magnifier, None, 0, 0, self.width, self.height, flags
+                self.hwnd_magnifier,
+                None,
+                0, 0,
+                self.width, self.height,
+                flags
             )
-        except Exception as e:
-             logger.error(f"Error updating window position: {e}")
+            # Force repaint
+            self.user32.UpdateWindow(self.hwnd_host)
 
+        except Exception as e:
+            logger.error(f"Error updating window position: {e}")
 
     def _update_content(self):
         """Update the magnified content."""
@@ -853,13 +865,22 @@ class WindowsMagnifier:
     def show_window(self):
         """Show the magnifier window."""
         if self.hwnd_host and self.user32 and self.initialized:
-            # Need to show both host and magnifier? Host first.
-            # SW_SHOWNA = 8 (Shows the window in its current state without activating it)
+            # Обязательно обновляем позицию перед показом
+            self._update_window_position()
+        
+            # Делаем паузу перед показом, чтобы убедиться, что позиция применилась
+            # Это может быть важно для Windows API
+            import time
+            time.sleep(0.05)
+        
+            # Показываем окно с флагом SW_SHOWNA (8) - показать без активации
             self.user32.ShowWindow(self.hwnd_host, 8)
-            # Ensure the magnifier control itself is also visible if needed
-            # self.user32.ShowWindow(self.hwnd_magnifier, 5) # SW_SHOW
-            self.user32.UpdateWindow(self.hwnd_host) # Updates client area
-            self._update_content() # Update content immediately on show
+        
+            # Обновляем содержимое окна
+            self._update_content()
+        
+            # Еще раз обновляем позицию после показа
+            self._update_window_position()
 
 
     def hide_window(self):
