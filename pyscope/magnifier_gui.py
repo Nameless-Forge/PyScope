@@ -3,7 +3,7 @@ import os
 import json
 import logging
 import platform
-from PyQt5.QtCore import Qt, QSize, QTimer
+from PyQt5.QtCore import Qt, QSize, QTimer, QThread
 from PyQt5.QtGui import QFont, QColor, QIcon
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
@@ -66,7 +66,7 @@ class MagnifierGUI(QMainWindow):
         
         # Display status message about the magnifier mode
         self.update_status_message()
-    
+
     def initialize_magnifier(self):
         """Initialize the magnifier and handle any errors."""
         success = self.magnifier.initialize()
@@ -77,6 +77,13 @@ class MagnifierGUI(QMainWindow):
                 "Could not fully initialize the magnifier. Some features may be limited.",
                 QMessageBox.Ok
             )
+
+    def invoke_in_main_thread(self, func, *args):
+        """Safely invoke a function in the main thread."""
+        timer = QTimer()
+        timer.setSingleShot(True)
+        timer.timeout.connect(lambda: func(*args))
+        timer.start(0)
     
     def init_ui(self):
         """Initialize the user interface."""
@@ -874,18 +881,18 @@ class MagnifierGUI(QMainWindow):
         """Show the magnifier or offset overlay."""
         self.window_visible = True
         if self.offset_display_checkbox.isChecked() and self.offset_overlay:
-            self.offset_overlay.show()
+            self.invoke_in_main_thread(self.offset_overlay.show)
         else:
-            self.magnifier.show_window()
-    
+            self.invoke_in_main_thread(self.magnifier.show_window)
+
     def hide_magnifier(self):
         """Hide the magnifier or offset overlay."""
         self.window_visible = False
         if self.offset_display_checkbox.isChecked() and self.offset_overlay:
-            self.offset_overlay.hide()
+            self.invoke_in_main_thread(self.offset_overlay.hide)
         else:
-            self.magnifier.hide_window()
-    
+            self.invoke_in_main_thread(self.magnifier.hide_window)
+
     def closeEvent(self, event):
         """Handle window close event."""
         # Don't actually close, just hide the window
@@ -895,7 +902,7 @@ class MagnifierGUI(QMainWindow):
         else:
             # This is a programmatic close, allow it
             event.accept()
-    
+
     def keyPressEvent(self, event):
         """Handle key press events."""
         # Hide window on Escape key
