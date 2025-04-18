@@ -15,9 +15,10 @@ import ctypes
 from ctypes import windll, c_int, c_float, Structure, POINTER, WinError, WINFUNCTYPE
 from ctypes.wintypes import BOOL, HWND, RECT, DWORD, ULONG
 from PIL import Image, ImageQt
-from PyQt5.QtCore import Qt, QRect, QPoint, QTimer, QPainterPath, QSize
-from PyQt5.QtGui import QPainter, QPen, QBrush, QColor, QRegion
+from PyQt5.QtCore import Qt, QRect, QPoint, QTimer, QSize
+from PyQt5.QtGui import QPainterPath
 from PyQt5.QtWidgets import QWidget, QApplication
+from PyQt5.QtGui import QRegion
 import mss
 
 
@@ -535,9 +536,12 @@ class WindowsMagnifier:
                 return False
             
             # Create magnifier control window
-            self.hwnd_magnifier = self.magnification.CreateMagnifier(
-                self.hwnd_host,
-                0, 0, self.width, self.height
+            self.hwnd_magnifier = self.user32.CreateWindowW(
+                "WC_MAGNIFIER",
+                None,
+                0x40000000,
+                0, 0, self.width, self.height,
+                self.hwnd_host, None, None, None
             )
             
             if not self.hwnd_magnifier:
